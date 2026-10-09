@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
     private static final int MUTED = 0xFF435066;
     private static final long ACTION_TIMEOUT_MS = 6500L;
 
-    private TextView km, meters, status, detail;
+    private TextView km, meters, status, detail, gpsSignal;
     private Button start, pause;
     private String pendingAction = null;
     private long pendingSince;
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("V7  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        body.addView(line("V8  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
         // Visible color-changing ON/OFF switch indicator, not just small text.
         status = line("TRACKING OFF", 22, Color.WHITE);
@@ -103,6 +103,11 @@ public class MainActivity extends Activity {
 
         detail = line("PAUSED  •  Press START to begin", 14, 0xFFB4C9E1);
         body.addView(detail);
+        gpsSignal = line("GPS: Waiting to start", 14, 0xFFF4BA50);
+        gpsSignal.setBackground(roundBackground(0xFF263950, 12));
+        LinearLayout.LayoutParams signalParams = new LinearLayout.LayoutParams(-1, -2);
+        signalParams.bottomMargin = dp(6);
+        body.addView(gpsSignal, signalParams);
 
         km = line("0.00 km", 48, 0xFF6AE9C4);
         km.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -126,7 +131,7 @@ public class MainActivity extends Activity {
                 "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
                 "When ON, START is locked until you press PAUSE. " +
                 "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V7 > Manage manually > Allow background running.",
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V8 > Manage manually > Allow background running.",
                 14, 0xFFB4C9E1);
         LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
         notes.topMargin = dp(20);
@@ -152,8 +157,10 @@ public class MainActivity extends Activity {
     }
 
     private boolean isTracking() {
-        return getSharedPreferences(TripService.PREFS, MODE_PRIVATE)
-                .getBoolean(TripService.KEY_ACTIVE, false);
+        SharedPreferences p = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
+        long heartbeat = p.getLong(TripService.KEY_HEARTBEAT, 0L);
+        return p.getBoolean(TripService.KEY_ACTIVE, false) && heartbeat > 0
+                && Math.abs(System.currentTimeMillis() - heartbeat) < 24000L;
     }
 
     private void startClicked() {
@@ -220,7 +227,11 @@ public class MainActivity extends Activity {
         if (km == null) return;
         SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
         float distance = prefs.getFloat(TripService.KEY_METERS, 0f);
-        boolean tracking = prefs.getBoolean(TripService.KEY_ACTIVE, false);
+        boolean storedOn = prefs.getBoolean(TripService.KEY_ACTIVE, false);
+        long heartbeat = prefs.getLong(TripService.KEY_HEARTBEAT, 0L);
+        boolean serviceAlive = heartbeat > 0L
+                && Math.abs(System.currentTimeMillis() - heartbeat) < 24000L;
+        boolean tracking = storedOn && serviceAlive;
 
         km.setText(String.format(Locale.US, "%.2f km", distance / 1000f));
         meters.setText(String.format(Locale.US, "%.0f metres", distance));
@@ -245,15 +256,38 @@ public class MainActivity extends Activity {
         } else if (tracking) {
             status.setText("●  TRACKING ON");
             status.setBackground(roundBackground(0xFF128C67, 16));
-            detail.setText("ACTIVE  •  Distance is being counted");
+            detail.setText("ACTIVE  •  Measuring GPS travel distance");
             styleButton(start, false, GREEN, "✓  ALREADY TRACKING");
             styleButton(pause, true, AMBER, "PAUSE TRACKING");
         } else {
             status.setText("●  TRACKING OFF");
             status.setBackground(roundBackground(0xFFB73E4E, 16));
-            detail.setText("PAUSED  •  Distance saved  •  Ready to START");
+            detail.setText(storedOn && !serviceAlive ? "SERVICE STOPPED  •  Press START again" : "PAUSED  •  Distance saved  •  Ready to START");
             styleButton(start, true, GREEN, "START TRACKING");
             styleButton(pause, false, AMBER, "PAUSED");
+        }
+        long lastFix = prefs.getLong(TripService.KEY_LAST_FIX, 0L);
+        float accuracy = prefs.getFloat(TripService.KEY_ACCURACY, -1f);
+        int fixes = prefs.getInt(TripService.KEY_FIXES, 0);
+        int counted = prefs.getInt(TripService.KEY_COUNTED, 0);
+        String source = prefs.getString(TripService.KEY_SOURCE, "NONE");
+        String note = prefs.getString(TripService.KEY_LAST_NOTE, "");
+        if (storedOn && !serviceAlive) {
+            gpsSignal.setText("GPS SERVICE STOPPED!\nAllow background running in Huawei Battery settings.");
+            gpsSignal.setTextColor(0xFFFF727F);
+        } else if (!tracking) {
+            gpsSignal.setText("GPS: OFF • Distance saved");
+            gpsSignal.setTextColor(0xFFCBD4E0);
+        } else if (lastFix == 0L) {
+            gpsSignal.setText("SEARCHING FOR GPS LOCATION...\nGo outside and wait for GPS signal.");
+            gpsSignal.setTextColor(0xFFF4BA50);
+        } else {
+            long age = Math.max(0L, (System.currentTimeMillis() - lastFix) / 1000L);
+            gpsSignal.setText(String.format(Locale.US,
+                    "GPS: %s • Accuracy: ±%.0f m • Last: %ds ago\n" +
+                    "Location updates: %d • Distance segments: %d\n%s",
+                    source, accuracy, age, fixes, counted, note));
+            gpsSignal.setTextColor(age > 25L || accuracy > 65f ? 0xFFF4BA50 : 0xFF6AE9C4);
         }
     }
 

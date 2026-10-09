@@ -26,6 +26,13 @@ public class TripService extends Service implements LocationListener {
     public static final String PREFS = "trip";
     public static final String KEY_METERS = "distance";
     public static final String KEY_ACTIVE = "tracking";
+    public static final String KEY_HEARTBEAT = "service_heartbeat";
+    public static final String KEY_LAST_FIX = "last_fix_time";
+    public static final String KEY_ACCURACY = "gps_accuracy";
+    public static final String KEY_SOURCE = "gps_provider";
+    public static final String KEY_FIXES = "gps_fix_count";
+    public static final String KEY_COUNTED = "distance_segments";
+    public static final String KEY_LAST_NOTE = "gps_note";
     private static final int NOTICE_ID = 17;
     private static final String CHANNEL = "gn_trip_gps";
 
@@ -35,6 +42,19 @@ public class TripService extends Service implements LocationListener {
     private float distance;
     private boolean active;
     private long noticeTime;
+    private long lastGpsElapsed;
+    private boolean listening;
+    private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable heartbeat = new Runnable() {
+        @Override public void run() {
+            if (!active) return;
+            prefs.edit().putLong(KEY_HEARTBEAT, System.currentTimeMillis()).apply();
+            handler.postDelayed(this, 5000L);
+        }
+    };
+    private void setNote(String note) {
+        prefs.edit().putString(KEY_LAST_NOTE, note).apply();
+    }
 
     @Override public void onCreate() {
         super.onCreate();
@@ -113,28 +133,57 @@ public class TripService extends Service implements LocationListener {
             endTracking();
             return;
         }
-        if (locationManager == null || !locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+        if (locationManager == null) {
             endTracking();
             return;
         }
-        if (active && previous != null) {
-            updateNotice(true);
+        if (active && listening) return;
+        boolean gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        boolean networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
+        if (!gpsEnabled && !networkEnabled) {
+            endTracking();
             return;
         }
         active = true;
-        previous = null; // Avoid joining the last point before pause/restart.
+        previous = null;
+        lastGpsElapsed = 0L;
+        prefs.edit().putLong(KEY_LAST_FIX, 0L)
+                .putInt(KEY_FIXES, 0).putInt(KEY_COUNTED, 0)
+                .putString(KEY_LAST_NOTE, "Waiting for first GPS location").apply();
         save();
+        boolean startedGps = false;
+        boolean startedNetwork = false;
         try {
-            locationManager.removeUpdates(this);
-            locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1500L, 1f, this);
-            updateNotice(true);
-        } catch (SecurityException | IllegalArgumentException error) {
-            endTracking();
+            if (gpsEnabled) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, this);
+                startedGps = true;
+            }
+        } catch (SecurityException | IllegalArgumentException ignored) {
+            setNote("Could not start GPS provider");
         }
+        try {
+            if (networkEnabled) {
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 1f, this);
+                startedNetwork = true;
+            }
+        } catch (SecurityException | IllegalArgumentException ignored) {
+            setNote("Network location unavailable");
+        }
+        listening = startedGps || startedNetwork;
+        if (!listening) {
+            endTracking();
+            return;
+        }
+        handler.removeCallbacks(heartbeat);
+        heartbeat.run();
+        updateNotice(true);
     }
 
     private void endTracking() {
         active = false;
+        listening = false;
+        handler.removeCallbacks(heartbeat);
+        prefs.edit().putLong(KEY_HEARTBEAT, 0L).apply();
         previous = null;
         if (locationManager != null) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) { }
@@ -149,20 +198,51 @@ public class TripService extends Service implements LocationListener {
     }
 
     @Override public void onLocationChanged(Location fix) {
-        if (!active || fix == null || !fix.hasAccuracy() || fix.getAccuracy() > 45f) return;
-        if (previous != null) {
-            float segment = previous.distanceTo(fix);
-            long deltaMs = (fix.getElapsedRealtimeNanos() - previous.getElapsedRealtimeNanos()) / 1000000L;
-            float minimum = Math.max(5f, fix.getAccuracy() * 0.5f);
-            // Reject jitter, huge GPS jumps, and impossible vehicle speeds.
-            if (deltaMs > 0 && deltaMs < 60000L && segment >= minimum
-                    && segment < 800f && (segment * 1000f / deltaMs) <= 55f) {
-                distance += segment;
-                save();
-                updateNotice(false);
-            }
+        if (!active || fix == null) return;
+        String provider = fix.getProvider() == null ? "unknown" : fix.getProvider();
+        boolean isGps = LocationManager.GPS_PROVIDER.equals(provider);
+        long nowElapsed = SystemClock.elapsedRealtime();
+        if (isGps) lastGpsElapsed = nowElapsed;
+
+        // Prefer satellite fixes while available; network fixes are fallback only.
+        if (!isGps && lastGpsElapsed > 0L && nowElapsed - lastGpsElapsed < 18000L) {
+            return;
         }
-        previous = new Location(fix);
+        prefs.edit().putLong(KEY_LAST_FIX, System.currentTimeMillis())
+                .putString(KEY_SOURCE, isGps ? "GPS" : "NETWORK")
+                .putFloat(KEY_ACCURACY, fix.hasAccuracy() ? fix.getAccuracy() : 999f)
+                .putInt(KEY_FIXES, prefs.getInt(KEY_FIXES, 0) + 1).apply();
+
+        if (!fix.hasAccuracy() || fix.getAccuracy() > 95f) {
+            setNote("Weak location accuracy - move outside");
+            return;
+        }
+        if (previous == null) {
+            previous = new Location(fix);
+            setNote("First GPS point received. Drive to count distance.");
+            return;
+        }
+        if (!provider.equals(previous.getProvider())) {
+            previous = new Location(fix);
+            setNote("Location source changed; resuming count");
+            return;
+        }
+        float segment = previous.distanceTo(fix);
+        long deltaMs = (fix.getElapsedRealtimeNanos() - previous.getElapsedRealtimeNanos()) / 1000000L;
+        float threshold = Math.max(3f, Math.min(9f, Math.max(previous.getAccuracy(), fix.getAccuracy()) * 0.2f));
+        if (deltaMs > 0 && deltaMs < 120000L && segment >= threshold
+                && segment < 1500f && segment * 1000f / deltaMs <= 60f) {
+            distance += segment;
+            prefs.edit().putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1).apply();
+            setNote(String.format(Locale.US, "+%.0f meters added", segment));
+            save();
+            updateNotice(false);
+        } else if (segment < threshold) {
+            setNote("Small GPS movement ignored (noise)");
+        } else {
+            setNote("GPS jump or outdated fix filtered");
+        }
+        if (deltaMs > 0) previous = new Location(fix);
     }
 
     @Override public void onProviderDisabled(String provider) { }
@@ -170,6 +250,7 @@ public class TripService extends Service implements LocationListener {
     @Override public void onStatusChanged(String provider, int status, Bundle extras) { }
     @Override public IBinder onBind(Intent intent) { return null; }
     @Override public void onDestroy() {
+        handler.removeCallbacks(heartbeat);
         if (locationManager != null) {
             try { locationManager.removeUpdates(this); } catch (SecurityException ignored) { }
         }
