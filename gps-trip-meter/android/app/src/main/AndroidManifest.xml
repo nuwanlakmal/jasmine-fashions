@@ -6,8 +6,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
     <application android:allowBackup="false"
-        android:label="GN GPS Trip Meter V10"
+        android:label="GN GPS Trip Meter V11"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <activity android:name=".HistoryActivity" android:exported="false" />
         <activity android:name=".RouteMapActivity" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

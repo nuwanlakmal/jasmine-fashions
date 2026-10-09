@@ -36,7 +36,7 @@ public class MainActivity extends Activity {
     private static final int MUTED = 0xFF435066;
     private static final long ACTION_TIMEOUT_MS = 6500L;
 
-    private TextView km, meters, status, detail, gpsSignal, totalKm;
+    private TextView km, meters, status, detail, gpsSignal, totalKm, todayKm, todayDate;
     private Button importTotal;
     private Button start, pause;
     private String pendingAction = null;
@@ -95,7 +95,7 @@ public class MainActivity extends Activity {
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("V10  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        body.addView(line("V11  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
         // Visible color-changing ON/OFF switch indicator, not just small text.
         status = line("TRACKING OFF", 22, Color.WHITE);
@@ -122,6 +122,18 @@ public class MainActivity extends Activity {
         totalKm.setBackground(roundBackground(0xFF294161, 14));
         body.addView(totalKm, new LinearLayout.LayoutParams(-1, dp(76)));
         body.addView(line("Total is never reset by NEW TRIP or RESET TRIP", 12, 0xFFB7CDDF));
+        
+        TextView dailyTitle = line("TODAY'S TOTAL DISTANCE", 16, 0xFF8DD6FF);
+        LinearLayout.LayoutParams dailyTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        dailyTitleParams.topMargin = dp(20);
+        body.addView(dailyTitle, dailyTitleParams);
+        todayDate = line("Date", 13, 0xFFB7CDDF);
+        body.addView(todayDate);
+        todayKm = line("0.00 km", 41, 0xFF62D9FF);
+        todayKm.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        todayKm.setBackground(roundBackground(0xFF1A3B5B, 14));
+        body.addView(todayKm, new LinearLayout.LayoutParams(-1, dp(76)));
+        body.addView(line("Resets automatically each local calendar day • History is kept", 12, 0xFFB7CDDF));
         
         TextView tripTitle = line("CURRENT TRIP", 18, 0xFF6AE9C4);
         LinearLayout.LayoutParams tripTitleParams = new LinearLayout.LayoutParams(-1, -2);
@@ -151,7 +163,15 @@ public class MainActivity extends Activity {
         Button map = button("VIEW SAVED ROUTE ON MAP", 0xFF356FC1);
         body.addView(map, new LinearLayout.LayoutParams(-1, dp(60)));
         addSpace(body);
-        importTotal = button("CARRY OVER OLD V9 TOTAL (ONE TIME)", 0xFF566C91);
+        Button history = button("VIEW DAILY KM HISTORY  •  BY DATE", 0xFF367E76);
+        body.addView(history, new LinearLayout.LayoutParams(-1, dp(60)));
+        history.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, HistoryActivity.class));
+            }
+        });
+        addSpace(body);
+        importTotal = button("CARRY OVER OLD V10 TOTAL (ONE TIME)", 0xFF566C91);
         body.addView(importTotal, new LinearLayout.LayoutParams(-1, dp(60)));
         importTotal.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showImportDialog(); }
@@ -170,14 +190,19 @@ public class MainActivity extends Activity {
         TextView instructions = line(
                 "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
                 "NEW TRIP starts a trip from 0. RESET TRIP affects current trip ONLY. " +
-                "TOTAL KM keeps increasing and has no reset button.\n\n" +
+                "TOTAL KM keeps increasing and has no reset button. " +
+                "TODAY resets every calendar day; each previous day remains in HISTORY.\n\n" +
                 "When ON, START is locked until you press PAUSE. " +
                 "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V10 > Manage manually > Allow background running.",
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V11 > Manage manually > Allow background running.",
                 14, 0xFFB4C9E1);
         LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
         notes.topMargin = dp(20);
         body.addView(instructions, notes);
+        TextView copyright = line("© 2026 Nuwan Lakmal | GN design", 13, 0xFF9AACBF);
+        LinearLayout.LayoutParams copyrightParams = new LinearLayout.LayoutParams(-1, -2);
+        copyrightParams.topMargin = dp(25);
+        body.addView(copyright, copyrightParams);
         setContentView(scroll);
 
         start.setOnClickListener(new View.OnClickListener() {
@@ -237,8 +262,8 @@ public class MainActivity extends Activity {
         input.setSingleLine(true);
         input.setHint("e.g. 127.50");
         new AlertDialog.Builder(this)
-                .setTitle("Carry over total from V9 (ONCE)")
-                .setMessage("Read TOTAL KM in the old V9 app and enter it here. This adds that mileage to V10 TOTAL only. You cannot edit or reset TOTAL afterward.")
+                .setTitle("Carry over total from V10 (ONCE)")
+                .setMessage("Read LIFETIME TOTAL KM in the old V10 app and enter it here. It adds to V11 lifetime total only, not to today's history. Save this once; you cannot edit or reset it afterward.")
                 .setView(input)
                 .setNegativeButton("CANCEL", null)
                 .setPositiveButton("SAVE ONCE", (dialog, which) -> {
@@ -337,6 +362,10 @@ public class MainActivity extends Activity {
         float distance = prefs.getFloat(TripService.KEY_TRIP_METERS, 0f);
         float totalDistance = prefs.getFloat(TripService.KEY_METERS, 0f);
         totalKm.setText(String.format(Locale.US, "%.2f km", totalDistance / 1000f));
+        String localDay = DailyHistory.today();
+        todayDate.setText(localDay);
+        todayKm.setText(String.format(Locale.US, "%.2f km",
+                DailyHistory.getDayMeters(prefs, localDay) / 1000f));
         if (importTotal != null) {
             importTotal.setVisibility(prefs.getBoolean(TripService.KEY_IMPORTED, false)
                     ? View.GONE : View.VISIBLE);

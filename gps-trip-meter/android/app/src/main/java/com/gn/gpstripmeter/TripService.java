@@ -308,9 +308,17 @@ public class TripService extends Service implements LocationListener {
         tripDistance += moved;
         previous = new Location(fix);
         TrackStore.append(this, fix);
-        prefs.edit().putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1).apply();
         setNote(String.format(Locale.US, "+%.0f m counted • route point saved", moved));
-        save();
+        // Atomic save: lifetime + trip + today's dated history all persist together.
+        String date = DailyHistory.today();
+        String dailyKey = DailyHistory.key(date);
+        float dailyMeters = prefs.getFloat(dailyKey, 0f) + moved;
+        prefs.edit()
+                .putFloat(KEY_METERS, distance)
+                .putFloat(KEY_TRIP_METERS, tripDistance)
+                .putFloat(dailyKey, dailyMeters)
+                .putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1)
+                .putBoolean(KEY_ACTIVE, active).commit();
         updateNotice(true);
     }
 
