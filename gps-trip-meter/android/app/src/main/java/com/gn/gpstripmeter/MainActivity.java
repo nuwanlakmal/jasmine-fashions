@@ -9,11 +9,13 @@ import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.location.LocationManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -25,17 +27,26 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int REQ_LOCATION = 42;
-    private TextView km, meters, status;
+    private static final int GREEN = 0xFF10B981;
+    private static final int RED = 0xFFE55A65;
+    private static final int AMBER = 0xFFF4BA50;
+    private static final int MUTED = 0xFF435066;
+    private static final long ACTION_TIMEOUT_MS = 6500L;
+
+    private TextView km, meters, status, detail;
+    private Button start, pause;
+    private String pendingAction = null;
+    private long pendingSince;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             refresh();
-            handler.postDelayed(this, 1000L);
+            handler.postDelayed(this, 700L);
         }
     };
 
-    private int dp(int v) {
-        return Math.round(v * getResources().getDisplayMetrics().density);
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
     private TextView line(String value, int size, int color) {
@@ -44,98 +55,146 @@ public class MainActivity extends Activity {
         t.setTextSize(size);
         t.setTextColor(color);
         t.setGravity(Gravity.CENTER);
-        t.setPadding(0, dp(10), 0, dp(10));
+        t.setPadding(dp(4), dp(10), dp(4), dp(10));
         return t;
     }
 
     private Button button(String label, int color) {
         Button b = new Button(this);
-        b.setText(label);
         b.setAllCaps(false);
+        b.setText(label);
+        b.setTextSize(17f);
         b.setTextColor(Color.WHITE);
-        b.setTextSize(17);
         b.setBackgroundTintList(ColorStateList.valueOf(color));
         return b;
     }
 
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
+    private GradientDrawable roundBackground(int fill, int radius) {
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(fill);
+        bg.setCornerRadius(dp(radius));
+        return bg;
+    }
+
+    @Override public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(0xFF101B30);
+
         LinearLayout body = new LinearLayout(this);
-        body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
-        body.setPadding(dp(20), dp(34), dp(20), dp(25));
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(18), dp(28), dp(18), dp(24));
         scroll.addView(body);
 
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("Android 9 • PickMe trip distance", 13, 0xFFBCD1EA));
+        body.addView(line("V7  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
-        km = line("0.00 km", 49, 0xFF61E2B7);
+        // Visible color-changing ON/OFF switch indicator, not just small text.
+        status = line("TRACKING OFF", 22, Color.WHITE);
+        status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        status.setBackground(roundBackground(RED, 16));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(68));
+        statusParams.topMargin = dp(26);
+        body.addView(status, statusParams);
+
+        detail = line("PAUSED  •  Press START to begin", 14, 0xFFB4C9E1);
+        body.addView(detail);
+
+        km = line("0.00 km", 48, 0xFF6AE9C4);
         km.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        km.setPadding(0, dp(35), 0, 0);
+        km.setPadding(0, dp(25), 0, dp(4));
         body.addView(km);
-        meters = line("0 metres", 17, Color.WHITE);
+        meters = line("0 metres", 18, Color.WHITE);
         body.addView(meters);
-        status = line("PAUSED", 16, 0xFFFFCD67);
-        status.setPadding(0, dp(16), 0, dp(24));
-        body.addView(status);
 
-        Button start = button("START TRACKING", 0xFF148A70);
-        Button pause = button("PAUSE TRACKING", 0xFFD49B36);
-        Button reset = button("RESET DISTANCE", 0xFFBD4F61);
-        body.addView(start, new LinearLayout.LayoutParams(-1, dp(58)));
-        spacer(body);
-        body.addView(pause, new LinearLayout.LayoutParams(-1, dp(58)));
-        spacer(body);
-        body.addView(reset, new LinearLayout.LayoutParams(-1, dp(58)));
-        body.addView(line("After pressing START, you can open PickMe or lock your screen. Keep the GPS notification on. For Huawei: Settings > Battery > App launch > manage GN GPS Trip Meter manually and allow background running.", 14, 0xFFBCD1EA));
+        start = button("START TRACKING", GREEN);
+        pause = button("PAUSE TRACKING", AMBER);
+        Button reset = button("RESET DISTANCE", 0xFFAA5275);
+        LinearLayout.LayoutParams firstParams = new LinearLayout.LayoutParams(-1, dp(60));
+        firstParams.topMargin = dp(24);
+        body.addView(start, firstParams);
+        addSpace(body);
+        body.addView(pause, new LinearLayout.LayoutParams(-1, dp(60)));
+        addSpace(body);
+        body.addView(reset, new LinearLayout.LayoutParams(-1, dp(60)));
+
+        TextView instructions = line(
+                "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
+                "When ON, START is locked until you press PAUSE. " +
+                "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V7 > Manage manually > Allow background running.",
+                14, 0xFFB4C9E1);
+        LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
+        notes.topMargin = dp(20);
+        body.addView(instructions, notes);
         setContentView(scroll);
 
         start.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { startClicked(); }
         });
         pause.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { send(TripService.ACTION_PAUSE); }
+            @Override public void onClick(View v) {
+                if (isTracking() && pendingAction == null) issue(TripService.ACTION_PAUSE);
+            }
         });
         reset.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { send(TripService.ACTION_RESET); }
+            @Override public void onClick(View v) { sendService(TripService.ACTION_RESET); }
         });
         refresh();
     }
 
-    private void spacer(LinearLayout container) {
-        container.addView(new View(this), new LinearLayout.LayoutParams(1, dp(11)));
+    private void addSpace(LinearLayout body) {
+        body.addView(new View(this), new LinearLayout.LayoutParams(dp(1), dp(10)));
+    }
+
+    private boolean isTracking() {
+        return getSharedPreferences(TripService.PREFS, MODE_PRIVATE)
+                .getBoolean(TripService.KEY_ACTIVE, false);
     }
 
     private void startClicked() {
-        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+        // Avoid duplicate START requests even before the service confirms tracking.
+        if (isTracking() || pendingAction != null) return;
+        if (Build.VERSION.SDK_INT >= 23
+                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
                 != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_LOCATION);
             return;
         }
         LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (lm == null || !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Toast.makeText(this, "Please turn on Phone Location / GPS", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Turn on GPS / Location first", Toast.LENGTH_LONG).show();
             return;
         }
-        send(TripService.ACTION_START);
+        issue(TripService.ACTION_START);
     }
 
-    private void send(String action) {
+    private void issue(String action) {
+        if (pendingAction != null) return;
+        pendingAction = action;
+        pendingSince = SystemClock.elapsedRealtime();
+        refresh();
+        if (!sendService(action)) {
+            pendingAction = null;
+            refresh();
+        }
+    }
+
+    private boolean sendService(String action) {
         try {
             Intent service = new Intent(this, TripService.class);
             service.setAction(action);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
             else startService(service);
-            handler.postDelayed(new Runnable() {
-                @Override public void run() { refresh(); }
-            }, 500L);
-        } catch (RuntimeException e) {
-            Toast.makeText(this, "Could not start GPS service: " + e.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
+            return true;
+        } catch (RuntimeException error) {
+            Toast.makeText(this, "GPS service error: " + error.getClass().getSimpleName(),
+                    Toast.LENGTH_LONG).show();
+            return false;
         }
     }
 
@@ -145,19 +204,57 @@ public class MainActivity extends Activity {
         if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             startClicked();
         } else {
-            Toast.makeText(this, "Allow precise Location permission to track distance", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Please allow Location permission", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void styleButton(Button button, boolean enabled, int color, String text) {
+        button.setEnabled(enabled);
+        button.setAlpha(1f);
+        button.setText(text);
+        button.setBackgroundTintList(ColorStateList.valueOf(enabled ? color : MUTED));
+        button.setTextColor(enabled ? Color.WHITE : 0xFFCBD4E0);
     }
 
     private void refresh() {
         if (km == null) return;
-        SharedPreferences p = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
-        float m = p.getFloat(TripService.KEY_METERS, 0f);
-        boolean active = p.getBoolean(TripService.KEY_ACTIVE, false);
-        km.setText(String.format(Locale.US, "%.2f km", m / 1000f));
-        meters.setText(String.format(Locale.US, "%.0f metres", m));
-        status.setText(active ? "TRACKING • GPS active" : "PAUSED • Press START");
-        status.setTextColor(active ? 0xFF61E2B7 : 0xFFFFCD67);
+        SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
+        float distance = prefs.getFloat(TripService.KEY_METERS, 0f);
+        boolean tracking = prefs.getBoolean(TripService.KEY_ACTIVE, false);
+
+        km.setText(String.format(Locale.US, "%.2f km", distance / 1000f));
+        meters.setText(String.format(Locale.US, "%.0f metres", distance));
+
+        if (pendingAction != null) {
+            boolean complete = TripService.ACTION_START.equals(pendingAction) ? tracking : !tracking;
+            if (complete) {
+                pendingAction = null;
+            } else if (SystemClock.elapsedRealtime() - pendingSince > ACTION_TIMEOUT_MS) {
+                pendingAction = null;
+                Toast.makeText(this, "No GPS confirmation. Please try again.", Toast.LENGTH_SHORT).show();
+            }
+        }
+
+        if (pendingAction != null) {
+            boolean starting = TripService.ACTION_START.equals(pendingAction);
+            status.setText(starting ? "●  STARTING GPS..." : "●  PAUSING...");
+            status.setBackground(roundBackground(0xFF946821, 16));
+            detail.setText(starting ? "Waiting for tracking confirmation" : "Stopping GPS tracking");
+            styleButton(start, false, GREEN, "PLEASE WAIT...");
+            styleButton(pause, false, AMBER, "PLEASE WAIT...");
+        } else if (tracking) {
+            status.setText("●  TRACKING ON");
+            status.setBackground(roundBackground(0xFF128C67, 16));
+            detail.setText("ACTIVE  •  Distance is being counted");
+            styleButton(start, false, GREEN, "✓  ALREADY TRACKING");
+            styleButton(pause, true, AMBER, "PAUSE TRACKING");
+        } else {
+            status.setText("●  TRACKING OFF");
+            status.setBackground(roundBackground(0xFFB73E4E, 16));
+            detail.setText("PAUSED  •  Distance saved  •  Ready to START");
+            styleButton(start, true, GREEN, "START TRACKING");
+            styleButton(pause, false, AMBER, "PAUSED");
+        }
     }
 
     @Override protected void onResume() {
@@ -165,6 +262,7 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(tick);
         tick.run();
     }
+
     @Override protected void onPause() {
         handler.removeCallbacks(tick);
         super.onPause();
