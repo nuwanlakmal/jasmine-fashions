@@ -44,6 +44,7 @@ public class TripService extends Service implements LocationListener {
     private long noticeTime;
     private long lastGpsElapsed;
     private boolean listening;
+    private int poorFixes;
     private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable heartbeat = new Runnable() {
         @Override public void run() {
@@ -86,6 +87,7 @@ public class TripService extends Service implements LocationListener {
             return START_NOT_STICKY;
         }
         if (ACTION_RESET.equals(action)) {
+            TrackStore.clear(this);
             distance = 0f;
             previous = null;
             save();
@@ -146,6 +148,7 @@ public class TripService extends Service implements LocationListener {
         }
         active = true;
         previous = null;
+        poorFixes = 0;
         lastGpsElapsed = 0L;
         prefs.edit().putLong(KEY_LAST_FIX, 0L)
                 .putInt(KEY_FIXES, 0).putInt(KEY_COUNTED, 0)
@@ -202,47 +205,78 @@ public class TripService extends Service implements LocationListener {
         String provider = fix.getProvider() == null ? "unknown" : fix.getProvider();
         boolean isGps = LocationManager.GPS_PROVIDER.equals(provider);
         long nowElapsed = SystemClock.elapsedRealtime();
+        float accuracy = fix.hasAccuracy() ? fix.getAccuracy() : 999f;
         if (isGps) lastGpsElapsed = nowElapsed;
 
-        // Prefer satellite fixes while available; network fixes are fallback only.
-        if (!isGps && lastGpsElapsed > 0L && nowElapsed - lastGpsElapsed < 18000L) {
-            return;
-        }
+        // If satellite accuracy is poor, permit a usable network fix as a fallback.
+        if (!isGps && lastGpsElapsed > 0 && nowElapsed - lastGpsElapsed < 14000L
+                && accuracy > 35f) return;
+
         prefs.edit().putLong(KEY_LAST_FIX, System.currentTimeMillis())
                 .putString(KEY_SOURCE, isGps ? "GPS" : "NETWORK")
-                .putFloat(KEY_ACCURACY, fix.hasAccuracy() ? fix.getAccuracy() : 999f)
+                .putFloat(KEY_ACCURACY, accuracy)
                 .putInt(KEY_FIXES, prefs.getInt(KEY_FIXES, 0) + 1).apply();
 
-        if (!fix.hasAccuracy() || fix.getAccuracy() > 95f) {
-            setNote("Weak location accuracy - move outside");
+        if (!fix.hasAccuracy() || accuracy > 135f) {
+            poorFixes++;
+            setNote("GPS weak: accuracy ±" + Math.round(accuracy)
+                    + " m. Move outside and wait for a stronger fix.");
             return;
         }
+        poorFixes = 0;
+
         if (previous == null) {
             previous = new Location(fix);
-            setNote("First GPS point received. Drive to count distance.");
+            TrackStore.append(this, fix);
+            setNote("First position saved. Move away from this point.");
             return;
         }
-        if (!provider.equals(previous.getProvider())) {
+        if (previous.getProvider() != null && !provider.equals(previous.getProvider())) {
             previous = new Location(fix);
-            setNote("Location source changed; resuming count");
+            TrackStore.append(this, fix);
+            setNote("Position source changed, continuing track.");
             return;
         }
-        float segment = previous.distanceTo(fix);
-        long deltaMs = (fix.getElapsedRealtimeNanos() - previous.getElapsedRealtimeNanos()) / 1000000L;
-        float threshold = Math.max(3f, Math.min(9f, Math.max(previous.getAccuracy(), fix.getAccuracy()) * 0.2f));
-        if (deltaMs > 0 && deltaMs < 120000L && segment >= threshold
-                && segment < 1500f && segment * 1000f / deltaMs <= 60f) {
-            distance += segment;
-            prefs.edit().putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1).apply();
-            setNote(String.format(Locale.US, "+%.0f meters added", segment));
-            save();
-            updateNotice(false);
-        } else if (segment < threshold) {
-            setNote("Small GPS movement ignored (noise)");
-        } else {
-            setNote("GPS jump or outdated fix filtered");
+
+        // Keep the last anchor for small movement instead of replacing it on each
+        // update. This fixes trips with GPS changes under 3-9m per location fix.
+        float moved = previous.distanceTo(fix);
+        long elapsedMs = (fix.getElapsedRealtimeNanos() - previous.getElapsedRealtimeNanos()) / 1000000L;
+        float accuracyMax = Math.max(previous.getAccuracy(), accuracy);
+        float threshold = Math.max(4f, Math.min(42f, accuracyMax * 0.38f));
+
+        if (elapsedMs <= 0L) {
+            setNote("Waiting for a newer GPS position");
+            return;
         }
-        if (deltaMs > 0) previous = new Location(fix);
+        if (elapsedMs >= 120000L) {
+            previous = new Location(fix);
+            TrackStore.append(this, fix);
+            setNote("GPS gap detected, starting next route segment.");
+            return;
+        }
+        if (moved < threshold) {
+            setNote(String.format(Locale.US,
+                    "Waiting for movement: %.0f m detected; needs %.0f m at ±%.0f m accuracy",
+                    moved, threshold, accuracyMax));
+            return; // DON'T move anchor: accumulate displacement until measurable.
+        }
+        float speed = moved * 1000f / elapsedMs;
+        if (moved > 1800f || speed > 55f) {
+            setNote("Suspicious GPS jump ignored");
+            // Reset after a jump so new fixes can reconnect without permanent lock.
+            previous = new Location(fix);
+            TrackStore.append(this, fix);
+            return;
+        }
+
+        distance += moved;
+        previous = new Location(fix);
+        TrackStore.append(this, fix);
+        prefs.edit().putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1).apply();
+        setNote(String.format(Locale.US, "+%.0f m counted • route point saved", moved));
+        save();
+        updateNotice(true);
     }
 
     @Override public void onProviderDisabled(String provider) { }

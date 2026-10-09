@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("V8  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        body.addView(line("V9  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
         // Visible color-changing ON/OFF switch indicator, not just small text.
         status = line("TRACKING OFF", 22, Color.WHITE);
@@ -126,12 +126,20 @@ public class MainActivity extends Activity {
         body.addView(pause, new LinearLayout.LayoutParams(-1, dp(60)));
         addSpace(body);
         body.addView(reset, new LinearLayout.LayoutParams(-1, dp(60)));
+        addSpace(body);
+        Button map = button("VIEW SAVED ROUTE ON MAP", 0xFF356FC1);
+        body.addView(map, new LinearLayout.LayoutParams(-1, dp(60)));
+        map.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, RouteMapActivity.class));
+            }
+        });
 
         TextView instructions = line(
                 "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
                 "When ON, START is locked until you press PAUSE. " +
                 "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V8 > Manage manually > Allow background running.",
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V9 > Manage manually > Allow background running.",
                 14, 0xFFB4C9E1);
         LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
         notes.topMargin = dp(20);
