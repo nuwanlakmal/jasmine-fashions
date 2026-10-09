@@ -117,6 +117,10 @@ public class TripService extends Service implements LocationListener {
             endTracking();
             return;
         }
+        if (active && previous != null) {
+            updateNotice(true);
+            return;
+        }
         active = true;
         previous = null; // Avoid joining the last point before pause/restart.
         save();
