@@ -22,9 +22,14 @@ import java.util.Locale;
 public class TripService extends Service implements LocationListener {
     public static final String ACTION_START = "com.gn.gpstripmeter.START";
     public static final String ACTION_PAUSE = "com.gn.gpstripmeter.PAUSE";
-    public static final String ACTION_RESET = "com.gn.gpstripmeter.RESET";
+    public static final String ACTION_RESET_TRIP = "com.gn.gpstripmeter.RESET_TRIP";
+    public static final String ACTION_NEW_TRIP = "com.gn.gpstripmeter.NEW_TRIP";
+    public static final String ACTION_IMPORT_TOTAL = "com.gn.gpstripmeter.IMPORT_TOTAL";
+    public static final String EXTRA_IMPORT_METERS = "import_meters";
     public static final String PREFS = "trip";
-    public static final String KEY_METERS = "distance";
+    public static final String KEY_METERS = "distance"; // Cumulative, non-resettable from UI
+    public static final String KEY_TRIP_METERS = "current_trip_distance";
+    public static final String KEY_IMPORTED = "previous_total_imported";
     public static final String KEY_ACTIVE = "tracking";
     public static final String KEY_HEARTBEAT = "service_heartbeat";
     public static final String KEY_LAST_FIX = "last_fix_time";
@@ -40,6 +45,7 @@ public class TripService extends Service implements LocationListener {
     private LocationManager locationManager;
     private Location previous;
     private float distance;
+    private float tripDistance;
     private boolean active;
     private long noticeTime;
     private long lastGpsElapsed;
@@ -61,6 +67,7 @@ public class TripService extends Service implements LocationListener {
         super.onCreate();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         distance = prefs.getFloat(KEY_METERS, 0f);
+        tripDistance = prefs.getFloat(KEY_TRIP_METERS, 0f);
         active = prefs.getBoolean(KEY_ACTIVE, false);
         locationManager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 26) {
@@ -86,11 +93,32 @@ public class TripService extends Service implements LocationListener {
             endTracking();
             return START_NOT_STICKY;
         }
-        if (ACTION_RESET.equals(action)) {
+        if (ACTION_IMPORT_TOTAL.equals(action)) {
+            float incoming = intent.getFloatExtra(EXTRA_IMPORT_METERS, -1f);
+            if (!prefs.getBoolean(KEY_IMPORTED, false) && Float.isFinite(incoming)
+                    && incoming >= 0f && incoming <= 10000000000f) {
+                distance += incoming;
+                prefs.edit().putBoolean(KEY_IMPORTED, true).commit();
+                save();
+            }
+            if (!active) {
+                stopForeground(true);
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            updateNotice(true);
+            return START_STICKY;
+        }
+        if (ACTION_RESET_TRIP.equals(action) || ACTION_NEW_TRIP.equals(action)) {
+            tripDistance = 0f; // NEVER reset cumulative "distance".
+            previous = null;   // Don't count gap from previous trip.
             TrackStore.clear(this);
-            distance = 0f;
-            previous = null;
+            prefs.edit().putInt(KEY_COUNTED, 0).commit();
             save();
+            if (ACTION_NEW_TRIP.equals(action)) {
+                startTracking();
+                return active ? START_STICKY : START_NOT_STICKY;
+            }
             if (!active) {
                 stopForeground(true);
                 stopSelf();
@@ -114,7 +142,8 @@ public class TripService extends Service implements LocationListener {
                 : new Notification.Builder(this);
         return builder.setSmallIcon(android.R.drawable.ic_menu_mylocation)
                 .setContentTitle("GN GPS Trip Meter")
-                .setContentText(String.format(Locale.US, "%.2f km • Tracking on", distance / 1000f))
+                .setContentText(String.format(Locale.US, "Trip %.2f km | Total %.2f km",
+                        tripDistance / 1000f, distance / 1000f))
                 .setOngoing(true)
                 .setContentIntent(tap)
                 .setShowWhen(false)
@@ -197,7 +226,10 @@ public class TripService extends Service implements LocationListener {
     }
 
     private void save() {
-        prefs.edit().putFloat(KEY_METERS, distance).putBoolean(KEY_ACTIVE, active).apply();
+        // Synchronous commit ensures both counters persist together after every segment.
+        prefs.edit().putFloat(KEY_METERS, distance)
+                .putFloat(KEY_TRIP_METERS, tripDistance)
+                .putBoolean(KEY_ACTIVE, active).commit();
     }
 
     @Override public void onLocationChanged(Location fix) {
@@ -273,6 +305,7 @@ public class TripService extends Service implements LocationListener {
         }
 
         distance += moved;
+        tripDistance += moved;
         previous = new Location(fix);
         TrackStore.append(this, fix);
         prefs.edit().putInt(KEY_COUNTED, prefs.getInt(KEY_COUNTED, 0) + 1).apply();

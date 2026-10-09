@@ -2,6 +2,7 @@ package com.gn.gpstripmeter;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -19,6 +20,8 @@ import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.text.InputType;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -33,7 +36,8 @@ public class MainActivity extends Activity {
     private static final int MUTED = 0xFF435066;
     private static final long ACTION_TIMEOUT_MS = 6500L;
 
-    private TextView km, meters, status, detail, gpsSignal;
+    private TextView km, meters, status, detail, gpsSignal, totalKm;
+    private Button importTotal;
     private Button start, pause;
     private String pendingAction = null;
     private long pendingSince;
@@ -91,7 +95,7 @@ public class MainActivity extends Activity {
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("V9  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        body.addView(line("V10  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
         // Visible color-changing ON/OFF switch indicator, not just small text.
         status = line("TRACKING OFF", 22, Color.WHITE);
@@ -109,6 +113,20 @@ public class MainActivity extends Activity {
         signalParams.bottomMargin = dp(6);
         body.addView(gpsSignal, signalParams);
 
+        TextView totalTitle = line("TOTAL DISTANCE  •  ALL TRIPS", 15, 0xFFB7CDDF);
+        LinearLayout.LayoutParams totalTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        totalTitleParams.topMargin = dp(18);
+        body.addView(totalTitle, totalTitleParams);
+        totalKm = line("0.00 km", 34, Color.WHITE);
+        totalKm.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        totalKm.setBackground(roundBackground(0xFF294161, 14));
+        body.addView(totalKm, new LinearLayout.LayoutParams(-1, dp(76)));
+        body.addView(line("Total is never reset by NEW TRIP or RESET TRIP", 12, 0xFFB7CDDF));
+        
+        TextView tripTitle = line("CURRENT TRIP", 18, 0xFF6AE9C4);
+        LinearLayout.LayoutParams tripTitleParams = new LinearLayout.LayoutParams(-1, -2);
+        tripTitleParams.topMargin = dp(16);
+        body.addView(tripTitle, tripTitleParams);
         km = line("0.00 km", 48, 0xFF6AE9C4);
         km.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         km.setPadding(0, dp(25), 0, dp(4));
@@ -118,10 +136,13 @@ public class MainActivity extends Activity {
 
         start = button("START TRACKING", GREEN);
         pause = button("PAUSE TRACKING", AMBER);
-        Button reset = button("RESET DISTANCE", 0xFFAA5275);
+        Button reset = button("RESET TRIP ONLY", 0xFFAA5275);
+        Button newTrip = button("NEW TRIP  •  START FROM 0", 0xFF1976AD);
         LinearLayout.LayoutParams firstParams = new LinearLayout.LayoutParams(-1, dp(60));
         firstParams.topMargin = dp(24);
-        body.addView(start, firstParams);
+        body.addView(newTrip, firstParams);
+        addSpace(body);
+        body.addView(start, new LinearLayout.LayoutParams(-1, dp(60)));
         addSpace(body);
         body.addView(pause, new LinearLayout.LayoutParams(-1, dp(60)));
         addSpace(body);
@@ -129,6 +150,17 @@ public class MainActivity extends Activity {
         addSpace(body);
         Button map = button("VIEW SAVED ROUTE ON MAP", 0xFF356FC1);
         body.addView(map, new LinearLayout.LayoutParams(-1, dp(60)));
+        addSpace(body);
+        importTotal = button("CARRY OVER OLD V9 TOTAL (ONE TIME)", 0xFF566C91);
+        body.addView(importTotal, new LinearLayout.LayoutParams(-1, dp(60)));
+        importTotal.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { showImportDialog(); }
+        });
+        newTrip.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                confirmTripAction(TripService.ACTION_NEW_TRIP);
+            }
+        });
         map.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 startActivity(new Intent(MainActivity.this, RouteMapActivity.class));
@@ -137,9 +169,11 @@ public class MainActivity extends Activity {
 
         TextView instructions = line(
                 "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
+                "NEW TRIP starts a trip from 0. RESET TRIP affects current trip ONLY. " +
+                "TOTAL KM keeps increasing and has no reset button.\n\n" +
                 "When ON, START is locked until you press PAUSE. " +
                 "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V9 > Manage manually > Allow background running.",
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V10 > Manage manually > Allow background running.",
                 14, 0xFFB4C9E1);
         LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
         notes.topMargin = dp(20);
@@ -155,9 +189,75 @@ public class MainActivity extends Activity {
             }
         });
         reset.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { sendService(TripService.ACTION_RESET); }
+            @Override public void onClick(View v) {
+                confirmTripAction(TripService.ACTION_RESET_TRIP);
+            }
         });
         refresh();
+    }
+
+    private void confirmTripAction(final String action) {
+        String message = TripService.ACTION_NEW_TRIP.equals(action)
+                ? "Start a NEW trip from 0 km now? This also replaces the current trip route on the map. TOTAL KM stays unchanged."
+                : "Reset CURRENT TRIP KM and its route only? TOTAL KM will NOT change.";
+        new AlertDialog.Builder(this).setTitle(TripService.ACTION_NEW_TRIP.equals(action) ?
+                "Start new trip?" : "Reset trip only?")
+                .setMessage(message)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("YES", (dialog, which) -> {
+                    if (TripService.ACTION_NEW_TRIP.equals(action)) {
+                        if (Build.VERSION.SDK_INT >= 23 &&
+                                checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) !=
+                                PackageManager.PERMISSION_GRANTED) {
+                            Toast.makeText(this, "Allow GPS permission first using START", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+                        if (lm == null || (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                                && !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))) {
+                            Toast.makeText(this, "Turn on Phone Location first", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                    }
+                    if (sendService(action)) {
+                        Toast.makeText(this, "Total KM unchanged", Toast.LENGTH_SHORT).show();
+                        handler.postDelayed(() -> refresh(), 400L);
+                    }
+                }).show();
+    }
+
+    private void showImportDialog() {
+        SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
+        if (prefs.getBoolean(TripService.KEY_IMPORTED, false)) {
+            Toast.makeText(this, "Previous total already carried over", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+        input.setSingleLine(true);
+        input.setHint("e.g. 127.50");
+        new AlertDialog.Builder(this)
+                .setTitle("Carry over total from V9 (ONCE)")
+                .setMessage("Read TOTAL KM in the old V9 app and enter it here. This adds that mileage to V10 TOTAL only. You cannot edit or reset TOTAL afterward.")
+                .setView(input)
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("SAVE ONCE", (dialog, which) -> {
+                    try {
+                        float kilometers = Float.parseFloat(input.getText().toString().trim());
+                        if (Float.isNaN(kilometers) || Float.isInfinite(kilometers)
+                                || kilometers < 0f || kilometers > 10000000f) {
+                            throw new NumberFormatException("Invalid distance");
+                        }
+                        Intent intent = new Intent(this, TripService.class);
+                        intent.setAction(TripService.ACTION_IMPORT_TOTAL);
+                        intent.putExtra(TripService.EXTRA_IMPORT_METERS, kilometers * 1000f);
+                        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
+                        else startService(intent);
+                        handler.postDelayed(() -> refresh(), 600L);
+                    } catch (NumberFormatException ex) {
+                        Toast.makeText(this, "Enter a valid number in km", Toast.LENGTH_LONG).show();
+                    }
+                }).show();
     }
 
     private void addSpace(LinearLayout body) {
@@ -234,7 +334,13 @@ public class MainActivity extends Activity {
     private void refresh() {
         if (km == null) return;
         SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
-        float distance = prefs.getFloat(TripService.KEY_METERS, 0f);
+        float distance = prefs.getFloat(TripService.KEY_TRIP_METERS, 0f);
+        float totalDistance = prefs.getFloat(TripService.KEY_METERS, 0f);
+        totalKm.setText(String.format(Locale.US, "%.2f km", totalDistance / 1000f));
+        if (importTotal != null) {
+            importTotal.setVisibility(prefs.getBoolean(TripService.KEY_IMPORTED, false)
+                    ? View.GONE : View.VISIBLE);
+        }
         boolean storedOn = prefs.getBoolean(TripService.KEY_ACTIVE, false);
         long heartbeat = prefs.getLong(TripService.KEY_HEARTBEAT, 0L);
         boolean serviceAlive = heartbeat > 0L
