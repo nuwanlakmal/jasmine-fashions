@@ -26,10 +26,10 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
-      - name: Install Android 35 platform
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Set up Android SDK (without discontinued tools package)
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
       - name: Compile and sign debug APK
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - name: Verify APK exists
