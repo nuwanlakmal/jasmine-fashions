@@ -71,8 +71,11 @@ public final class TrackStore {
         JSONArray coordinates = new JSONArray();
         for (double[] point : read(context, 2200)) {
             JSONArray row = new JSONArray();
-            row.put(point[0]); row.put(point[1]);
-            coordinates.put(row);
+            try {
+                row.put(point[0]);
+                row.put(point[1]);
+                coordinates.put(row);
+            } catch (org.json.JSONException ignored) { }
         }
         return coordinates;
     }
