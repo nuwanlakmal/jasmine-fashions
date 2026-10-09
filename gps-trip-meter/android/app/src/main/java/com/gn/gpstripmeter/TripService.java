@@ -231,10 +231,12 @@ public class TripService extends Service implements LocationListener {
             setNote("First position saved. Move away from this point.");
             return;
         }
-        if (previous.getProvider() != null && !provider.equals(previous.getProvider())) {
-            previous = new Location(fix);
-            TrackStore.append(this, fix);
-            setNote("Position source changed, continuing track.");
+        // Keep the distance anchor across GPS/network provider switches.
+        // Resetting it on every switch caused zero-distance trips on weak GPS phones.
+        // Accuracy and speed filters below still guard against bad mixed fixes.
+        if (accuracy > 85f && previous.getAccuracy() < 35f
+                && nowElapsed - (previous.getElapsedRealtimeNanos() / 1000000L) < 15000L) {
+            setNote("Weak GPS point ignored; keeping more accurate last location");
             return;
         }
 
