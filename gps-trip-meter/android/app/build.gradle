@@ -5,11 +5,11 @@ android {
     namespace 'com.gn.gpstripmeter'
     compileSdk 35
     defaultConfig {
-        applicationId 'com.gn.gpstripmeter.huawei'
+        applicationId 'com.gn.gpstripmeter.huawei.v7'
         minSdk 23
         targetSdk 28
-        versionCode 6
-        versionName '6.0'
+        versionCode 7
+        versionName '7.0'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
