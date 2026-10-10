@@ -42,10 +42,10 @@ public class RouteMapActivity extends Activity {
         super.onCreate(state);
         LinearLayout column = new LinearLayout(this);
         column.setOrientation(LinearLayout.VERTICAL);
-        column.setBackgroundColor(0xFF101B30);
+        column.setBackgroundColor(ThemePrefs.background(this));
 
         info = new TextView(this);
-        info.setTextColor(Color.WHITE);
+        info.setTextColor(ThemePrefs.primary(this));
         info.setTextSize(15);
         info.setPadding(15, 16, 15, 13);
         info.setText("Opening saved GPS route...");
@@ -67,13 +67,15 @@ public class RouteMapActivity extends Activity {
         google.setAllCaps(false);
         google.setText("OPEN GOOGLE MAPS (SUGGESTED DIRECTIONS)");
         google.setTextSize(14);
+        google.setTextColor(ThemePrefs.primary(this));
+        google.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ThemePrefs.panel(this)));
         google.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { openGoogleMaps(); }
         });
         column.addView(google, new LinearLayout.LayoutParams(-1, -2));
 
         TextView explanation = new TextView(this);
-        explanation.setTextColor(0xFFB9CDE3);
+        explanation.setTextColor(ThemePrefs.secondary(this));
         explanation.setTextSize(12);
         explanation.setPadding(15, 6, 15, 15);
         explanation.setText("Blue line = exact saved GPS points (OpenStreetMap). " +

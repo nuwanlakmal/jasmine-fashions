@@ -32,7 +32,7 @@ public class HistoryActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         ScrollView scroll = new ScrollView(this);
-        scroll.setBackgroundColor(0xFF101B30);
+        scroll.setBackgroundColor(ThemePrefs.background(this));
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         list.setPadding(dp(16), dp(25), dp(16), dp(20));
@@ -47,11 +47,11 @@ public class HistoryActivity extends Activity {
 
     private void renderHistory() {
         list.removeAllViews();
-        TextView title = label("DAILY DISTANCE HISTORY", 22, Color.WHITE);
+        TextView title = label("DAILY DISTANCE HISTORY", 22, ThemePrefs.primary(this));
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         list.addView(title);
         list.addView(label("Each date's total stays saved when a new day begins",
-                13, 0xFFB7CDDF));
+                13, ThemePrefs.secondary(this)));
         SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
         String today = DailyHistory.today();
         addRow(today, DailyHistory.getDayMeters(prefs, today), true);
@@ -64,8 +64,8 @@ public class HistoryActivity extends Activity {
         }
         if (previousCount == 0)
             list.addView(label("Earlier days will appear here after you record trips.",
-                    14, 0xFFB7CDDF));
-        TextView footer = label("© 2026 Nuwan Lakmal | GN design", 13, 0xFF9AACBF);
+                    14, ThemePrefs.secondary(this)));
+        TextView footer = label("© 2026 Nuwan Lakmal | GN design", 13, ThemePrefs.secondary(this));
         list.addView(footer);
     }
 
@@ -74,11 +74,11 @@ public class HistoryActivity extends Activity {
         row.setPadding(dp(12), dp(6), dp(12), dp(6));
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setBackgroundColor(isToday ? 0xFF155D61 : 0xFF263950);
-        TextView day = label(date + (isToday ? "  •  TODAY" : ""), 16, Color.WHITE);
+        row.setBackgroundColor(isToday ? (ThemePrefs.isDark(this)?0xFF155D61:0xFFD3F3E9) : ThemePrefs.panel(this));
+        TextView day = label(date + (isToday ? "  •  TODAY" : ""), 16, ThemePrefs.primary(this));
         row.addView(day, new LinearLayout.LayoutParams(0, dp(60), 1));
         TextView distance = label(String.format(Locale.US, "%.2f km", meters / 1000f),
-                19, 0xFF6AE9C4);
+                19, ThemePrefs.accent(this));
         distance.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         row.addView(distance);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
