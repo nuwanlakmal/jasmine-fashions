@@ -20,8 +20,6 @@ import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
-import android.widget.EditText;
-import android.text.InputType;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -29,419 +27,325 @@ import android.widget.Toast;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int REQ_LOCATION = 42;
-    private static final int GREEN = 0xFF10B981;
-    private static final int RED = 0xFFE55A65;
-    private static final int AMBER = 0xFFF4BA50;
-    private static final int MUTED = 0xFF435066;
-    private static final long ACTION_TIMEOUT_MS = 6500L;
-
-    private TextView km, meters, status, detail, gpsSignal, totalKm, todayKm, todayDate;
-    private Button importTotal;
-    private Button start, pause;
-    private String pendingAction = null;
-    private long pendingSince;
+    private static final int REQUEST_LOCATION = 42;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable tick = new Runnable() {
+    private TextView status, todayValue, todayDate, totalValue, tripValue, gpsValue;
+    private Button start, pause;
+    private boolean currentThemeDark;
+    private String pendingAction;
+    private long pendingTime;
+
+    private final Runnable update = new Runnable() {
         @Override public void run() {
             refresh();
-            handler.postDelayed(this, 700L);
+            handler.postDelayed(this, 1000L);
         }
     };
 
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
+    private int dp(int x) { return Math.round(x * getResources().getDisplayMetrics().density); }
+    private int ink() { return currentThemeDark ? 0xFFF4F8FF : 0xFF17233A; }
+    private int muted() { return currentThemeDark ? 0xFF9FB0C9 : 0xFF5E7087; }
+    private int panel() { return currentThemeDark ? 0xFF17243A : 0xFFFFFFFF; }
+    private int background() { return currentThemeDark ? 0xFF0B1425 : 0xFFF0F4F9; }
+    private int accent() { return currentThemeDark ? 0xFF36E7B3 : 0xFF067A65; }
 
-    private TextView line(String value, int size, int color) {
+    private GradientDrawable rounded(int color, int radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setCornerRadius(dp(radius));
+        d.setColor(color);
+        return d;
+    }
+    private TextView text(String value, int size, int color, boolean bold) {
         TextView t = new TextView(this);
         t.setText(value);
         t.setTextSize(size);
         t.setTextColor(color);
         t.setGravity(Gravity.CENTER);
-        t.setPadding(dp(4), dp(10), dp(4), dp(10));
+        t.setIncludeFontPadding(false);
+        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
-
     private Button button(String label, int color) {
         Button b = new Button(this);
-        b.setAllCaps(false);
         b.setText(label);
-        b.setTextSize(17f);
+        b.setTextSize(13);
+        b.setAllCaps(false);
         b.setTextColor(Color.WHITE);
+        b.setPadding(dp(3), 0, dp(3), 0);
+        b.setMinimumHeight(0);
+        b.setMinHeight(0);
         b.setBackgroundTintList(ColorStateList.valueOf(color));
         return b;
     }
-
-    private GradientDrawable roundBackground(int fill, int radius) {
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(fill);
-        bg.setCornerRadius(dp(radius));
-        return bg;
+    private void space(LinearLayout target, int height) {
+        target.addView(new View(this), new LinearLayout.LayoutParams(1, dp(height)));
+    }
+    private void addButton(LinearLayout row, Button b) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(47), 1f);
+        p.setMargins(dp(3), 0, dp(3), 0);
+        row.addView(b,p);
+    }
+    private LinearLayout buttonRow(LinearLayout outer, Button a, Button b) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        addButton(row, a);
+        addButton(row, b);
+        outer.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        return row;
+    }
+    private LinearLayout card() {
+        LinearLayout c = new LinearLayout(this);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setGravity(Gravity.CENTER);
+        c.setPadding(dp(8),dp(12),dp(8),dp(12));
+        c.setBackground(rounded(panel(), 16));
+        return c;
+    }
+    private LinearLayout metric(String title, String value, int titleColor, int valueColor, int size) {
+        LinearLayout c=card();
+        c.addView(text(title, 11, titleColor, true));
+        TextView v=text(value,size,valueColor,true);
+        c.addView(v);
+        return c;
     }
 
-    @Override public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        ScrollView scroll = new ScrollView(this);
+    @Override public void onCreate(Bundle state) {
+        super.onCreate(state);
+        currentThemeDark=ThemePrefs.isDark(this);
+        setTheme(currentThemeDark ? android.R.style.Theme_Material_NoActionBar
+                : android.R.style.Theme_Material_Light_NoActionBar);
+        buildDashboard();
+    }
+
+    private void buildDashboard() {
+        ScrollView scroll=new ScrollView(this);
+        scroll.setBackgroundColor(background());
         scroll.setFillViewport(true);
-        scroll.setBackgroundColor(0xFF101B30);
+        scroll.setVerticalScrollBarEnabled(false);
+        LinearLayout outer=new LinearLayout(this);
+        outer.setOrientation(LinearLayout.VERTICAL);
+        outer.setPadding(dp(12),dp(12),dp(12),dp(9));
+        scroll.addView(outer);
 
-        LinearLayout body = new LinearLayout(this);
-        body.setGravity(Gravity.CENTER_HORIZONTAL);
-        body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(dp(18), dp(28), dp(18), dp(24));
-        scroll.addView(body);
+        LinearLayout header=new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        TextView name=text("GN  KM COUNTER",18,ink(),true);
+        name.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        header.addView(name,new LinearLayout.LayoutParams(0,dp(42),1f));
+        Button settings=button("⚙ Settings",currentThemeDark ? 0xFF283B57:0xFF55728F);
+        settings.setTextSize(13);
+        header.addView(settings,new LinearLayout.LayoutParams(dp(115),dp(42)));
+        settings.setOnClickListener(v -> startActivity(new Intent(this,SettingsActivity.class)));
+        outer.addView(header);
+        space(outer,6);
 
-        TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
-        header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        body.addView(header);
-        body.addView(line("V12  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        status=text("●  TRACKING OFF",15,Color.WHITE,true);
+        status.setBackground(rounded(0xFFB44659,13));
+        outer.addView(status,new LinearLayout.LayoutParams(-1,dp(43)));
+        space(outer,9);
 
-        // Visible color-changing ON/OFF switch indicator, not just small text.
-        status = line("TRACKING OFF", 22, Color.WHITE);
-        status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        status.setBackground(roundBackground(RED, 16));
-        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, dp(68));
-        statusParams.topMargin = dp(26);
-        body.addView(status, statusParams);
+        LinearLayout todayCard=card();
+        todayCard.setBackground(rounded(currentThemeDark?0xFF103F41:0xFFD9F5EB,16));
+        todayDate=text("TODAY • "+DailyHistory.today(),12,currentThemeDark?0xFFB4D4D0:0xFF33675D,true);
+        todayCard.addView(todayDate);
+        todayValue=text("0.00 km",36,accent(),true);
+        LinearLayout.LayoutParams todayParams=new LinearLayout.LayoutParams(-1,dp(78));
+        todayCard.addView(todayValue,todayParams);
+        outer.addView(todayCard,new LinearLayout.LayoutParams(-1,dp(116)));
+        space(outer,8);
 
-        detail = line("PAUSED  •  Press START to begin", 14, 0xFFB4C9E1);
-        body.addView(detail);
-        gpsSignal = line("GPS: Waiting to start", 14, 0xFFF4BA50);
-        gpsSignal.setBackground(roundBackground(0xFF263950, 12));
-        LinearLayout.LayoutParams signalParams = new LinearLayout.LayoutParams(-1, -2);
-        signalParams.bottomMargin = dp(6);
-        body.addView(gpsSignal, signalParams);
+        LinearLayout metrics=new LinearLayout(this);
+        metrics.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout lifetime=metric("LIFETIME TOTAL","0.00 km",muted(),ink(),23);
+        LinearLayout trip=metric("CURRENT TRIP","0.00 km",muted(),accent(),23);
+        totalValue=(TextView)lifetime.getChildAt(1);
+        tripValue=(TextView)trip.getChildAt(1);
+        LinearLayout.LayoutParams left=new LinearLayout.LayoutParams(0,dp(88),1f);
+        left.rightMargin=dp(4);
+        LinearLayout.LayoutParams right=new LinearLayout.LayoutParams(0,dp(88),1f);
+        right.leftMargin=dp(4);
+        metrics.addView(lifetime,left);
+        metrics.addView(trip,right);
+        outer.addView(metrics);
+        space(outer,8);
 
-        TextView totalTitle = line("TOTAL DISTANCE  •  ALL TRIPS", 15, 0xFFB7CDDF);
-        LinearLayout.LayoutParams totalTitleParams = new LinearLayout.LayoutParams(-1, -2);
-        totalTitleParams.topMargin = dp(18);
-        body.addView(totalTitle, totalTitleParams);
-        totalKm = line("0.00 km", 34, Color.WHITE);
-        totalKm.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        totalKm.setBackground(roundBackground(0xFF294161, 14));
-        body.addView(totalKm, new LinearLayout.LayoutParams(-1, dp(76)));
-        body.addView(line("Total is never reset by NEW TRIP or RESET TRIP", 12, 0xFFB7CDDF));
-        
-        TextView dailyTitle = line("TODAY'S TOTAL DISTANCE", 16, 0xFF8DD6FF);
-        LinearLayout.LayoutParams dailyTitleParams = new LinearLayout.LayoutParams(-1, -2);
-        dailyTitleParams.topMargin = dp(20);
-        body.addView(dailyTitle, dailyTitleParams);
-        todayDate = line("Date", 13, 0xFFB7CDDF);
-        body.addView(todayDate);
-        todayKm = line("0.00 km", 41, 0xFF62D9FF);
-        todayKm.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        todayKm.setBackground(roundBackground(0xFF1A3B5B, 14));
-        body.addView(todayKm, new LinearLayout.LayoutParams(-1, dp(76)));
-        body.addView(line("Resets automatically each local calendar day • History is kept", 12, 0xFFB7CDDF));
-        
-        TextView tripTitle = line("CURRENT TRIP", 18, 0xFF6AE9C4);
-        LinearLayout.LayoutParams tripTitleParams = new LinearLayout.LayoutParams(-1, -2);
-        tripTitleParams.topMargin = dp(16);
-        body.addView(tripTitle, tripTitleParams);
-        km = line("0.00 km", 48, 0xFF6AE9C4);
-        km.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        km.setPadding(0, dp(25), 0, dp(4));
-        body.addView(km);
-        meters = line("0 metres", 18, Color.WHITE);
-        body.addView(meters);
+        gpsValue=text("GPS • Waiting to start",11,muted(),false);
+        gpsValue.setMaxLines(2);
+        gpsValue.setBackground(rounded(panel(),10));
+        outer.addView(gpsValue,new LinearLayout.LayoutParams(-1,dp(45)));
+        space(outer,11);
 
-        start = button("START TRACKING", GREEN);
-        pause = button("PAUSE TRACKING", AMBER);
-        Button reset = button("RESET TRIP ONLY", 0xFFAA5275);
-        Button newTrip = button("NEW TRIP  •  START FROM 0", 0xFF1976AD);
-        LinearLayout.LayoutParams firstParams = new LinearLayout.LayoutParams(-1, dp(60));
-        firstParams.topMargin = dp(24);
-        body.addView(newTrip, firstParams);
-        addSpace(body);
-        body.addView(start, new LinearLayout.LayoutParams(-1, dp(60)));
-        addSpace(body);
-        body.addView(pause, new LinearLayout.LayoutParams(-1, dp(60)));
-        addSpace(body);
-        body.addView(reset, new LinearLayout.LayoutParams(-1, dp(60)));
-        addSpace(body);
-        Button map = button("VIEW SAVED ROUTE ON MAP", 0xFF356FC1);
-        body.addView(map, new LinearLayout.LayoutParams(-1, dp(60)));
-        addSpace(body);
-        Button history = button("VIEW DAILY KM HISTORY  •  BY DATE", 0xFF367E76);
-        body.addView(history, new LinearLayout.LayoutParams(-1, dp(60)));
-        history.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, HistoryActivity.class));
-            }
-        });
-        addSpace(body);
-        importTotal = button("CARRY OVER OLD V11 TOTAL (ONE TIME)", 0xFF566C91);
-        body.addView(importTotal, new LinearLayout.LayoutParams(-1, dp(60)));
-        importTotal.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { showImportDialog(); }
-        });
-        newTrip.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                confirmTripAction(TripService.ACTION_NEW_TRIP);
-            }
-        });
-        map.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                startActivity(new Intent(MainActivity.this, RouteMapActivity.class));
-            }
-        });
+        Button newTrip=button("＋ NEW TRIP",0xFF257BA3);
+        start=button("▶ START",0xFF128969);
+        pause=button("Ⅱ PAUSE",0xFFB58932);
+        Button reset=button("↺ RESET TRIP",0xFFB14966);
+        Button history=button("▤ HISTORY",0xFF346D7C);
+        Button map=button("⌖ ROUTE MAP",0xFF365AAB);
+        buttonRow(outer,newTrip,start);
+        space(outer,7);
+        buttonRow(outer,pause,reset);
+        space(outer,7);
+        buttonRow(outer,history,map);
+        space(outer,7);
 
-        TextView instructions = line(
-                "GREEN = TRACKING ON   |   RED = TRACKING OFF\n\n" +
-                "NEW TRIP starts a trip from 0. RESET TRIP affects current trip ONLY. " +
-                "TOTAL KM keeps increasing and has no reset button. " +
-                "TODAY resets every calendar day; each previous day remains in HISTORY.\n\n" +
-                "When ON, START is locked until you press PAUSE. " +
-                "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V12 > Manage manually > Allow background running.",
-                14, 0xFFB4C9E1);
-        LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
-        notes.topMargin = dp(20);
-        body.addView(instructions, notes);
-        TextView copyright = line("© 2026 Nuwan Lakmal | GN design", 13, 0xFF9AACBF);
-        LinearLayout.LayoutParams copyrightParams = new LinearLayout.LayoutParams(-1, -2);
-        copyrightParams.topMargin = dp(25);
-        body.addView(copyright, copyrightParams);
+        TextView footer=text("© 2026 Nuwan Lakmal | GN design",11,muted(),false);
+        outer.addView(footer,new LinearLayout.LayoutParams(-1,dp(30)));
         setContentView(scroll);
 
-        start.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { startClicked(); }
+        start.setOnClickListener(v -> startClicked());
+        pause.setOnClickListener(v -> {
+            if(isTracking() && pendingAction==null) issue(TripService.ACTION_PAUSE);
         });
-        pause.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                if (isTracking() && pendingAction == null) issue(TripService.ACTION_PAUSE);
-            }
-        });
-        reset.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) {
-                confirmTripAction(TripService.ACTION_RESET_TRIP);
-            }
-        });
+        newTrip.setOnClickListener(v -> confirmTrip(TripService.ACTION_NEW_TRIP));
+        reset.setOnClickListener(v -> confirmTrip(TripService.ACTION_RESET_TRIP));
+        history.setOnClickListener(v -> startActivity(new Intent(this,HistoryActivity.class)));
+        map.setOnClickListener(v -> startActivity(new Intent(this,RouteMapActivity.class)));
         refresh();
     }
 
-    private void confirmTripAction(final String action) {
-        String message = TripService.ACTION_NEW_TRIP.equals(action)
-                ? "Start a NEW trip from 0 km now? This also replaces the current trip route on the map. TOTAL KM stays unchanged."
-                : "Reset CURRENT TRIP KM and its route only? TOTAL KM will NOT change.";
-        new AlertDialog.Builder(this).setTitle(TripService.ACTION_NEW_TRIP.equals(action) ?
-                "Start new trip?" : "Reset trip only?")
-                .setMessage(message)
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("YES", (dialog, which) -> {
-                    if (TripService.ACTION_NEW_TRIP.equals(action)) {
-                        if (Build.VERSION.SDK_INT >= 23 &&
-                                checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) !=
-                                PackageManager.PERMISSION_GRANTED) {
-                            Toast.makeText(this, "Allow GPS permission first using START", Toast.LENGTH_LONG).show();
-                            return;
-                        }
-                        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-                        if (lm == null || (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-                                && !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))) {
-                            Toast.makeText(this, "Turn on Phone Location first", Toast.LENGTH_LONG).show();
-                            return;
-                        }
-                    }
-                    if (sendService(action)) {
-                        Toast.makeText(this, "Total KM unchanged", Toast.LENGTH_SHORT).show();
-                        handler.postDelayed(() -> refresh(), 400L);
-                    }
-                }).show();
+    private SharedPreferences gps() {
+        return getSharedPreferences(TripService.PREFS,MODE_PRIVATE);
     }
-
-    private void showImportDialog() {
-        SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
-        if (prefs.getBoolean(TripService.KEY_IMPORTED, false)) {
-            Toast.makeText(this, "Previous total already carried over", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-        input.setSingleLine(true);
-        input.setHint("e.g. 127.50");
-        new AlertDialog.Builder(this)
-                .setTitle("Carry over total from V11 (ONCE)")
-                .setMessage("Read LIFETIME TOTAL KM in the old V11 app and enter it here. It adds to V11 lifetime total only, not to today's history. Save this once; you cannot edit or reset it afterward.")
-                .setView(input)
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("SAVE ONCE", (dialog, which) -> {
-                    try {
-                        float kilometers = Float.parseFloat(input.getText().toString().trim());
-                        if (Float.isNaN(kilometers) || Float.isInfinite(kilometers)
-                                || kilometers < 0f || kilometers > 10000000f) {
-                            throw new NumberFormatException("Invalid distance");
-                        }
-                        Intent intent = new Intent(this, TripService.class);
-                        intent.setAction(TripService.ACTION_IMPORT_TOTAL);
-                        intent.putExtra(TripService.EXTRA_IMPORT_METERS, kilometers * 1000f);
-                        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent);
-                        else startService(intent);
-                        handler.postDelayed(() -> refresh(), 600L);
-                    } catch (NumberFormatException ex) {
-                        Toast.makeText(this, "Enter a valid number in km", Toast.LENGTH_LONG).show();
-                    }
-                }).show();
-    }
-
-    private void addSpace(LinearLayout body) {
-        body.addView(new View(this), new LinearLayout.LayoutParams(dp(1), dp(10)));
-    }
-
     private boolean isTracking() {
-        SharedPreferences p = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
-        long heartbeat = p.getLong(TripService.KEY_HEARTBEAT, 0L);
-        return p.getBoolean(TripService.KEY_ACTIVE, false) && heartbeat > 0
-                && Math.abs(System.currentTimeMillis() - heartbeat) < 24000L;
+        SharedPreferences p=gps();
+        long beat=p.getLong(TripService.KEY_HEARTBEAT,0L);
+        return p.getBoolean(TripService.KEY_ACTIVE,false) && beat>0L
+                && Math.abs(System.currentTimeMillis()-beat)<24000L;
     }
-
     private void startClicked() {
-        // Avoid duplicate START requests even before the service confirms tracking.
-        if (isTracking() || pendingAction != null) return;
-        if (Build.VERSION.SDK_INT >= 23
-                && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQ_LOCATION);
+        if(isTracking() || pendingAction!=null)return;
+        if(Build.VERSION.SDK_INT>=23 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                !=PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION},REQUEST_LOCATION);
             return;
         }
-        LocationManager lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-        if (lm == null || !lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
-            Toast.makeText(this, "Turn on GPS / Location first", Toast.LENGTH_LONG).show();
+        LocationManager lm=(LocationManager)getSystemService(Context.LOCATION_SERVICE);
+        if(lm==null || (!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                && !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))){
+            Toast.makeText(this,"Please enable Location/GPS",Toast.LENGTH_LONG).show();
             return;
         }
         issue(TripService.ACTION_START);
     }
-
-    private void issue(String action) {
-        if (pendingAction != null) return;
-        pendingAction = action;
-        pendingSince = SystemClock.elapsedRealtime();
-        refresh();
-        if (!sendService(action)) {
-            pendingAction = null;
-            refresh();
-        }
-    }
-
-    private boolean sendService(String action) {
+    private boolean send(String action) {
         try {
-            Intent service = new Intent(this, TripService.class);
+            Intent service=new Intent(this,TripService.class);
             service.setAction(action);
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+            if(Build.VERSION.SDK_INT>=26)startForegroundService(service);
             else startService(service);
             return true;
-        } catch (RuntimeException error) {
-            Toast.makeText(this, "GPS service error: " + error.getClass().getSimpleName(),
-                    Toast.LENGTH_LONG).show();
+        }catch(Exception e){
+            Toast.makeText(this,"GPS service error: "+e.getClass().getSimpleName(),Toast.LENGTH_LONG).show();
             return false;
         }
     }
-
-    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(request, permissions, results);
-        if (request != REQ_LOCATION) return;
-        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
-            startClicked();
-        } else {
-            Toast.makeText(this, "Please allow Location permission", Toast.LENGTH_LONG).show();
-        }
+    private void issue(String action) {
+        if(pendingAction!=null)return;
+        pendingAction=action;
+        pendingTime=SystemClock.elapsedRealtime();
+        refresh();
+        if(!send(action)){pendingAction=null;refresh();}
     }
-
-    private void styleButton(Button button, boolean enabled, int color, String text) {
-        button.setEnabled(enabled);
-        button.setAlpha(1f);
-        button.setText(text);
-        button.setBackgroundTintList(ColorStateList.valueOf(enabled ? color : MUTED));
-        button.setTextColor(enabled ? Color.WHITE : 0xFFCBD4E0);
+    private void confirmTrip(String action) {
+        String title=TripService.ACTION_NEW_TRIP.equals(action)?"NEW TRIP":"RESET CURRENT TRIP";
+        String message=TripService.ACTION_NEW_TRIP.equals(action)
+                ?"Start counting this new trip from 0 km? Lifetime and today's total stay saved."
+                :"Reset only CURRENT TRIP KM and its route? Lifetime and today's total stay saved.";
+        new AlertDialog.Builder(this).setTitle(title).setMessage(message)
+                .setNegativeButton("CANCEL",null)
+                .setPositiveButton("YES",(dialog,which)->{
+                    if(TripService.ACTION_NEW_TRIP.equals(action)){
+                        if(Build.VERSION.SDK_INT>=23 && checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+                                !=PackageManager.PERMISSION_GRANTED) {
+                            Toast.makeText(this,"Allow GPS permission using START first",Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        LocationManager lm=(LocationManager)getSystemService(Context.LOCATION_SERVICE);
+                        if(lm==null||(!lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+                                && !lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER))){
+                            Toast.makeText(this,"Turn on GPS first",Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                    }
+                    if(send(action))handler.postDelayed(this::refresh,600);
+                }).show();
     }
-
-    private void refresh() {
-        if (km == null) return;
-        SharedPreferences prefs = getSharedPreferences(TripService.PREFS, MODE_PRIVATE);
-        float distance = prefs.getFloat(TripService.KEY_TRIP_METERS, 0f);
-        float totalDistance = prefs.getFloat(TripService.KEY_METERS, 0f);
-        totalKm.setText(String.format(Locale.US, "%.2f km", totalDistance / 1000f));
-        String localDay = DailyHistory.today();
-        todayDate.setText(localDay);
-        todayKm.setText(String.format(Locale.US, "%.2f km",
-                DailyHistory.getDayMeters(prefs, localDay) / 1000f));
-        if (importTotal != null) {
-            importTotal.setVisibility(prefs.getBoolean(TripService.KEY_IMPORTED, false)
-                    ? View.GONE : View.VISIBLE);
-        }
-        boolean storedOn = prefs.getBoolean(TripService.KEY_ACTIVE, false);
-        long heartbeat = prefs.getLong(TripService.KEY_HEARTBEAT, 0L);
-        boolean serviceAlive = heartbeat > 0L
-                && Math.abs(System.currentTimeMillis() - heartbeat) < 24000L;
-        boolean tracking = storedOn && serviceAlive;
-
-        km.setText(String.format(Locale.US, "%.2f km", distance / 1000f));
-        meters.setText(String.format(Locale.US, "%.0f metres", distance));
-
-        if (pendingAction != null) {
-            boolean complete = TripService.ACTION_START.equals(pendingAction) ? tracking : !tracking;
-            if (complete) {
-                pendingAction = null;
-            } else if (SystemClock.elapsedRealtime() - pendingSince > ACTION_TIMEOUT_MS) {
-                pendingAction = null;
-                Toast.makeText(this, "No GPS confirmation. Please try again.", Toast.LENGTH_SHORT).show();
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results) {
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==REQUEST_LOCATION && results.length>0
+                && results[0]==PackageManager.PERMISSION_GRANTED) startClicked();
+    }
+    private void styleButton(Button b,boolean enabled,int tint,String label){
+        b.setEnabled(enabled);
+        b.setText(label);
+        b.setBackgroundTintList(ColorStateList.valueOf(enabled?tint:
+                (currentThemeDark?0xFF3D495B:0xFFAAB6C4)));
+        b.setTextColor(enabled?Color.WHITE:(currentThemeDark?0xFFAAB6C8:0xFFF6F8FA));
+    }
+    private void refresh(){
+        if(status==null)return;
+        SharedPreferences p=gps();
+        String day=DailyHistory.today();
+        float total=p.getFloat(TripService.KEY_METERS,0f);
+        float trip=p.getFloat(TripService.KEY_TRIP_METERS,0f);
+        float today=DailyHistory.getDayMeters(p,day);
+        totalValue.setText(String.format(Locale.US,"%.2f km",total/1000f));
+        tripValue.setText(String.format(Locale.US,"%.2f km",trip/1000f));
+        todayValue.setText(String.format(Locale.US,"%.2f km",today/1000f));
+        todayDate.setText("TODAY • "+day);
+        boolean tracking=isTracking();
+        if(pendingAction!=null){
+            boolean completed=TripService.ACTION_START.equals(pendingAction)?tracking:!tracking;
+            if(completed)pendingAction=null;
+            else if(SystemClock.elapsedRealtime()-pendingTime>7000L){
+                pendingAction=null;
+                Toast.makeText(this,"Tracking not confirmed; check GPS",Toast.LENGTH_SHORT).show();
             }
         }
-
-        if (pendingAction != null) {
-            boolean starting = TripService.ACTION_START.equals(pendingAction);
-            status.setText(starting ? "●  STARTING GPS..." : "●  PAUSING...");
-            status.setBackground(roundBackground(0xFF946821, 16));
-            detail.setText(starting ? "Waiting for tracking confirmation" : "Stopping GPS tracking");
-            styleButton(start, false, GREEN, "PLEASE WAIT...");
-            styleButton(pause, false, AMBER, "PLEASE WAIT...");
-        } else if (tracking) {
+        if(pendingAction!=null) {
+            status.setText("●  "+(TripService.ACTION_START.equals(pendingAction)?"STARTING...":"PAUSING..."));
+            status.setBackground(rounded(0xFF936323,13));
+            styleButton(start,false,0xFF128969,"WAIT...");
+            styleButton(pause,false,0xFFB58932,"WAIT...");
+        }else if(tracking) {
             status.setText("●  TRACKING ON");
-            status.setBackground(roundBackground(0xFF128C67, 16));
-            detail.setText("ACTIVE  •  Measuring GPS travel distance");
-            styleButton(start, false, GREEN, "✓  ALREADY TRACKING");
-            styleButton(pause, true, AMBER, "PAUSE TRACKING");
-        } else {
+            status.setBackground(rounded(0xFF148763,13));
+            styleButton(start,false,0xFF128969,"✓ ALREADY ON");
+            styleButton(pause,true,0xFFB58932,"Ⅱ PAUSE");
+        }else{
             status.setText("●  TRACKING OFF");
-            status.setBackground(roundBackground(0xFFB73E4E, 16));
-            detail.setText(storedOn && !serviceAlive ? "SERVICE STOPPED  •  Press START again" : "PAUSED  •  Distance saved  •  Ready to START");
-            styleButton(start, true, GREEN, "START TRACKING");
-            styleButton(pause, false, AMBER, "PAUSED");
+            status.setBackground(rounded(0xFFB44659,13));
+            styleButton(start,true,0xFF128969,"▶ START");
+            styleButton(pause,false,0xFFB58932,"PAUSED");
         }
-        long lastFix = prefs.getLong(TripService.KEY_LAST_FIX, 0L);
-        float accuracy = prefs.getFloat(TripService.KEY_ACCURACY, -1f);
-        int fixes = prefs.getInt(TripService.KEY_FIXES, 0);
-        int counted = prefs.getInt(TripService.KEY_COUNTED, 0);
-        String source = prefs.getString(TripService.KEY_SOURCE, "NONE");
-        String note = prefs.getString(TripService.KEY_LAST_NOTE, "");
-        if (storedOn && !serviceAlive) {
-            gpsSignal.setText("GPS SERVICE STOPPED!\nAllow background running in Huawei Battery settings.");
-            gpsSignal.setTextColor(0xFFFF727F);
-        } else if (!tracking) {
-            gpsSignal.setText("GPS: OFF • Distance saved");
-            gpsSignal.setTextColor(0xFFCBD4E0);
-        } else if (lastFix == 0L) {
-            gpsSignal.setText("SEARCHING FOR GPS LOCATION...\nGo outside and wait for GPS signal.");
-            gpsSignal.setTextColor(0xFFF4BA50);
-        } else {
-            long age = Math.max(0L, (System.currentTimeMillis() - lastFix) / 1000L);
-            gpsSignal.setText(String.format(Locale.US,
-                    "GPS: %s • Accuracy: ±%.0f m • Last: %ds ago\n" +
-                    "Location updates: %d • Distance segments: %d\n%s",
-                    source, accuracy, age, fixes, counted, note));
-            gpsSignal.setTextColor(age > 25L || accuracy > 65f ? 0xFFF4BA50 : 0xFF6AE9C4);
+        if(!tracking){
+            gpsValue.setText("GPS • Tracking paused");
+            return;
         }
+        long fix=p.getLong(TripService.KEY_LAST_FIX,0L);
+        if(fix<=0){
+            gpsValue.setText("GPS • Searching for location. Move outdoors.");
+            return;
+        }
+        long age=Math.max(0,(System.currentTimeMillis()-fix)/1000L);
+        float acc=p.getFloat(TripService.KEY_ACCURACY,-1f);
+        gpsValue.setText(String.format(Locale.US,
+                "%s GPS ±%.0f m • %ds ago\nUpdates %d • Counted %d",
+                p.getString(TripService.KEY_SOURCE,"GPS"),acc,age,
+                p.getInt(TripService.KEY_FIXES,0),p.getInt(TripService.KEY_COUNTED,0)));
     }
-
-    @Override protected void onResume() {
+    @Override protected void onResume(){
         super.onResume();
-        handler.removeCallbacks(tick);
-        tick.run();
+        if(currentThemeDark!=ThemePrefs.isDark(this)){
+            recreate();
+            return;
+        }
+        handler.removeCallbacks(update);
+        update.run();
     }
-
-    @Override protected void onPause() {
-        handler.removeCallbacks(tick);
+    @Override protected void onPause(){
+        handler.removeCallbacks(update);
         super.onPause();
     }
 }
