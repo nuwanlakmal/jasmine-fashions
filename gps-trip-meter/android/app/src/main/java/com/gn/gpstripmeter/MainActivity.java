@@ -171,7 +171,7 @@ public class MainActivity extends Activity {
             }
         });
         addSpace(body);
-        importTotal = button("CARRY OVER OLD V10 TOTAL (ONE TIME)", 0xFF566C91);
+        importTotal = button("CARRY OVER OLD V11 TOTAL (ONE TIME)", 0xFF566C91);
         body.addView(importTotal, new LinearLayout.LayoutParams(-1, dp(60)));
         importTotal.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { showImportDialog(); }
@@ -262,8 +262,8 @@ public class MainActivity extends Activity {
         input.setSingleLine(true);
         input.setHint("e.g. 127.50");
         new AlertDialog.Builder(this)
-                .setTitle("Carry over total from V10 (ONCE)")
-                .setMessage("Read LIFETIME TOTAL KM in the old V10 app and enter it here. It adds to V11 lifetime total only, not to today's history. Save this once; you cannot edit or reset it afterward.")
+                .setTitle("Carry over total from V11 (ONCE)")
+                .setMessage("Read LIFETIME TOTAL KM in the old V11 app and enter it here. It adds to V11 lifetime total only, not to today's history. Save this once; you cannot edit or reset it afterward.")
                 .setView(input)
                 .setNegativeButton("CANCEL", null)
                 .setPositiveButton("SAVE ONCE", (dialog, which) -> {
