@@ -95,7 +95,7 @@ public class MainActivity extends Activity {
         TextView header = line("GN GPS TRIP METER", 22, Color.WHITE);
         header.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         body.addView(header);
-        body.addView(line("V11  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
+        body.addView(line("V12  |  Huawei Android 9  |  PickMe", 13, 0xFFB4C9E1));
 
         // Visible color-changing ON/OFF switch indicator, not just small text.
         status = line("TRACKING OFF", 22, Color.WHITE);
@@ -194,7 +194,7 @@ public class MainActivity extends Activity {
                 "TODAY resets every calendar day; each previous day remains in HISTORY.\n\n" +
                 "When ON, START is locked until you press PAUSE. " +
                 "You can use PickMe and lock your screen while the GPS notification is visible.\n\n" +
-                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V11 > Manage manually > Allow background running.",
+                "Huawei: Settings > Battery > App launch > GN GPS Trip Meter V12 > Manage manually > Allow background running.",
                 14, 0xFFB4C9E1);
         LinearLayout.LayoutParams notes = new LinearLayout.LayoutParams(-1, -2);
         notes.topMargin = dp(20);
